@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>clock</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --blur: 24px;
+    --glass: rgba(255,255,255,0.08);
+    --glass-border: rgba(255,255,255,0.15);
+    --glass-strong: rgba(255,255,255,0.13);
+  }
+
+  body {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'DM Mono', monospace;
+    overflow: hidden;
+    background: #0a0a12;
+    position: relative;
+  }
+
+  .orb {
+    position: fixed;
+    border-radius: 50%;
+    filter: blur(80px);
+    opacity: 0.55;
+    pointer-events: none;
+    animation: drift 18s ease-in-out infinite alternate;
+  }
+  .orb-1 { width: 520px; height: 520px; background: #5b3ff8; top: -100px; left: -120px; animation-duration: 20s; }
+  .orb-2 { width: 400px; height: 400px; background: #f83fa0; bottom: -80px; right: -60px; animation-duration: 15s; animation-delay: -7s; }
+  .orb-3 { width: 300px; height: 300px; background: #3ff8c8; top: 40%; left: 55%; animation-duration: 23s; animation-delay: -3s; opacity: 0.35; }
+
+  @keyframes drift {
+    0%   { transform: translate(0, 0) scale(1); }
+    33%  { transform: translate(30px, -40px) scale(1.05); }
+    66%  { transform: translate(-20px, 20px) scale(0.97); }
+    100% { transform: translate(15px, -15px) scale(1.02); }
+  }
+
+  .stage {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 28px;
+  }
+
+  .glass-card {
+    background: var(--glass);
+    backdrop-filter: blur(var(--blur));
+    -webkit-backdrop-filter: blur(var(--blur));
+    border: 1px solid var(--glass-border);
+    border-radius: 32px;
+    padding: 52px 64px 44px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .glass-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 32px;
+    background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, transparent 60%);
+    pointer-events: none;
+  }
+
+  .time-display {
+    font-family: 'DM Serif Display', serif;
+    font-size: clamp(72px, 14vw, 130px);
+    color: #fff;
+    letter-spacing: -4px;
+    line-height: 1;
+    text-shadow: 0 0 60px rgba(180,130,255,0.4);
+    user-select: none;
+  }
+
+  .time-display .colon {
+    opacity: 1;
+    animation: blink 1s step-end infinite;
+    display: inline-block;
+    margin: 0 2px;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.15; }
+  }
+
+  .ampm {
+    font-family: 'DM Mono', monospace;
+    font-size: 14px;
+    font-weight: 300;
+    letter-spacing: 4px;
+    color: rgba(255,255,255,0.45);
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+
+  .date-pill {
+    background: var(--glass-strong);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--glass-border);
+    border-radius: 100px;
+    padding: 10px 28px;
+    font-size: 12px;
+    font-weight: 400;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.55);
+  }
+
+  .seconds-track {
+    width: 280px;
+    height: 3px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 100px;
+    overflow: hidden;
+    position: relative;
+    margin-top: 4px;
+  }
+
+  .seconds-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #a78bfa, #f472b6);
+    border-radius: 100px;
+    transition: width 0.95s linear;
+    box-shadow: 0 0 12px rgba(167,139,250,0.7);
+  }
+
+  .timezone {
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: rgba(255,255,255,0.25);
+    text-transform: uppercase;
+    margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+
+<div class="orb orb-1"></div>
+<div class="orb orb-2"></div>
+<div class="orb orb-3"></div>
+
+<div class="stage">
+  <div class="glass-card">
+    <div class="time-display">
+      <span id="hours">12</span><span class="colon">:</span><span id="minutes">00</span>
+    </div>
+    <div class="ampm" id="ampm">AM</div>
+    <div class="seconds-track" style="margin-top: 20px;">
+      <div class="seconds-fill" id="secbar" style="width: 0%"></div>
+    </div>
+  </div>
+  <div class="date-pill" id="datestr">loading...</div>
+  <div class="timezone" id="tz"></div>
+</div>
+
+<script>
+  const days = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+  const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+
+  function tick() {
+    const now = new Date();
+    let h = now.getHours();
+    const m = now.getMinutes();
+    const s = now.getSeconds();
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+
+    document.getElementById('hours').textContent = String(h).padStart(2,'0');
+    document.getElementById('minutes').textContent = String(m).padStart(2,'0');
+    document.getElementById('ampm').textContent = ampm;
+    document.getElementById('secbar').style.width = ((s / 59) * 100) + '%';
+
+    const dateStr = `${days[now.getDay()]}  ·  ${months[now.getMonth()]} ${now.getDate()}, ${now.getFullYear()}`;
+    document.getElementById('datestr').textContent = dateStr;
+
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    document.getElementById('tz').textContent = tz.replace('_',' ');
+  }
+
+  tick();
+  setInterval(tick, 1000);
+</script>
+</body>
+</html>
