@@ -1,1 +1,1 @@
-Interactive particle playground. Move your mouse, click to explode. Open index.html in any browser.s
+Interactive particle playground. Move your mouse, click to explode. Open index.html in any browser.
