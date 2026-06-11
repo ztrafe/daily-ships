@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>particles</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital@0;1&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #080810; overflow: hidden; }
+  canvas { display: block; }
+
+  .ui {
+    position: fixed;
+    bottom: 32px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .pill {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.3);
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 100px;
+    padding: 8px 18px;
+    cursor: pointer;
+    transition: all 0.2s;
+    user-select: none;
+  }
+  .pill:hover, .pill.active {
+    color: rgba(255,255,255,0.85);
+    background: rgba(255,255,255,0.1);
+    border-color: rgba(255,255,255,0.2);
+  }
+
+  .hint {
+    position: fixed;
+    top: 32px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.18);
+    animation: fadeout 4s forwards;
+    animation-delay: 2s;
+  }
+
+  @keyframes fadeout {
+    to { opacity: 0; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div class="hint">move mouse · click to explode</div>
+
+<div class="ui">
+  <div class="pill active" id="mode-attract" onclick="setMode('attract')">attract</div>
+  <div class="pill" id="mode-repel" onclick="setMode('repel')">repel</div>
+  <div class="pill" id="mode-vortex" onclick="setMode('vortex')">vortex</div>
+  <div class="pill" onclick="randomizeColors()">recolor</div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let W = canvas.width = window.innerWidth;
+let H = canvas.height = window.innerHeight;
+
+window.addEventListener('resize', () => {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+});
+
+const PARTICLE_COUNT = 220;
+let mode = 'attract';
+let mouse = { x: W / 2, y: H / 2 };
+
+const palettes = [
+  ['#a78bfa','#f472b6','#38bdf8','#fb923c'],
+  ['#34d399','#60a5fa','#f472b6','#fbbf24'],
+  ['#f87171','#fb923c','#fbbf24','#4ade80'],
+  ['#818cf8','#a78bfa','#e879f9','#22d3ee'],
+  ['#ff6b6b','#ffd93d','#6bcb77','#4d96ff'],
+];
+let currentPalette = palettes[0];
+
+function randomizeColors() {
+  currentPalette = palettes[Math.floor(Math.random() * palettes.length)];
+  particles.forEach(p => {
+    p.color = currentPalette[Math.floor(Math.random() * currentPalette.length)];
+  });
+}
+
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
+  document.getElementById('mode-' + m)?.classList.add('active');
+}
+
+class Particle {
+  constructor() { this.reset(true); }
+
+  reset(initial = false) {
+    this.x = initial ? Math.random() * W : W / 2;
+    this.y = initial ? Math.random() * H : H / 2;
+    this.vx = (Math.random() - 0.5) * 2;
+    this.vy = (Math.random() - 0.5) * 2;
+    this.radius = Math.random() * 2.5 + 1;
+    this.color = currentPalette[Math.floor(Math.random() * currentPalette.length)];
+    this.alpha = Math.random() * 0.6 + 0.4;
+    this.trail = [];
+  }
+
+  update() {
+    const dx = mouse.x - this.x;
+    const dy = mouse.y - this.y;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    const force = Math.min(120 / (dist * dist), 2.5);
+
+    if (mode === 'attract') {
+      this.vx += (dx / dist) * force;
+      this.vy += (dy / dist) * force;
+    } else if (mode === 'repel') {
+      this.vx -= (dx / dist) * force * 1.5;
+      this.vy -= (dy / dist) * force * 1.5;
+    } else if (mode === 'vortex') {
+      this.vx += (-dy / dist) * force;
+      this.vy += (dx / dist) * force;
+    }
+
+    this.vx *= 0.94;
+    this.vy *= 0.94;
+
+    const speed = Math.sqrt(this.vx*this.vx + this.vy*this.vy);
+    if (speed > 8) { this.vx = (this.vx/speed)*8; this.vy = (this.vy/speed)*8; }
+
+    this.trail.push({ x: this.x, y: this.y });
+    if (this.trail.length > 12) this.trail.shift();
+
+    this.x += this.vx;
+    this.y += this.vy;
+
+    if (this.x < -10) this.x = W + 10;
+    if (this.x > W + 10) this.x = -10;
+    if (this.y < -10) this.y = H + 10;
+    if (this.y > H + 10) this.y = -10;
+  }
+
+  draw() {
+    for (let i = 0; i < this.trail.length; i++) {
+      const t = this.trail[i];
+      const prog = i / this.trail.length;
+      ctx.beginPath();
+      ctx.arc(t.x, t.y, this.radius * prog * 0.7, 0, Math.PI * 2);
+      ctx.fillStyle = this.color + Math.floor(prog * 60).toString(16).padStart(2,'0');
+      ctx.fill();
+    }
+
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+    ctx.fillStyle = this.color;
+    ctx.shadowBlur = 12;
+    ctx.shadowColor = this.color;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+}
+
+class Burst {
+  constructor(x, y, color) {
+    this.x = x; this.y = y;
+    const angle = Math.random() * Math.PI * 2;
+    const speed = Math.random() * 7 + 2;
+    this.vx = Math.cos(angle) * speed;
+    this.vy = Math.sin(angle) * speed;
+    this.alpha = 1;
+    this.radius = Math.random() * 3 + 1;
+    this.color = color;
+    this.decay = Math.random() * 0.025 + 0.015;
+  }
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.vx *= 0.95;
+    this.vy *= 0.95;
+    this.alpha -= this.decay;
+  }
+  draw() {
+    ctx.globalAlpha = Math.max(0, this.alpha);
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+    ctx.fillStyle = this.color;
+    ctx.shadowBlur = 8;
+    ctx.shadowColor = this.color;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+}
+
+const particles = Array.from({ length: PARTICLE_COUNT }, () => new Particle());
+let bursts = [];
+
+canvas.addEventListener('mousemove', e => {
+  mouse.x = e.clientX;
+  mouse.y = e.clientY;
+});
+
+canvas.addEventListener('click', e => {
+  const colors = currentPalette;
+  for (let i = 0; i < 60; i++) {
+    bursts.push(new Burst(e.clientX, e.clientY, colors[Math.floor(Math.random() * colors.length)]));
+  }
+});
+
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  mouse.x = e.touches[0].clientX;
+  mouse.y = e.touches[0].clientY;
+}, { passive: false });
+
+canvas.addEventListener('touchstart', e => {
+  const colors = currentPalette;
+  for (let i = 0; i < 60; i++) {
+    bursts.push(new Burst(e.touches[0].clientX, e.touches[0].clientY, colors[Math.floor(Math.random() * colors.length)]));
+  }
+});
+
+function loop() {
+  ctx.fillStyle = 'rgba(8,8,16,0.18)';
+  ctx.fillRect(0, 0, W, H);
+
+  particles.forEach(p => { p.update(); p.draw(); });
+
+  bursts = bursts.filter(b => b.alpha > 0);
+  bursts.forEach(b => { b.update(); b.draw(); });
+
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>
