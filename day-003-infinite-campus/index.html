@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>gen art</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #080808; display: flex; align-items: center; justify-content: center; min-height: 100vh; overflow: hidden; }
+  canvas { display: block; border-radius: 4px; }
+  .ui { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; z-index: 10; }
+  .btn {
+    font-family: 'Syne', sans-serif; font-size: 11px; letter-spacing: 2px; text-transform: uppercase;
+    color: rgba(255,255,255,0.4); background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 100px; padding: 9px 22px; cursor: pointer; transition: all 0.2s; user-select: none;
+  }
+  .btn:hover { color: rgba(255,255,255,0.9); background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.25); }
+  .info { position: fixed; top: 24px; left: 28px; font-family: 'Syne', sans-serif; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: rgba(255,255,255,0.2); display: flex; flex-direction: column; gap: 4px; }
+  .seed-display { font-family: 'Syne', sans-serif; font-size: 10px; letter-spacing: 2px; color: rgba(255,255,255,0.15); position: fixed; top: 24px; right: 28px; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="info"><span id="style-label"></span><span id="palette-label"></span></div>
+<div class="seed-display" id="seed-display"></div>
+<div class="ui">
+  <div class="btn" onclick="generate()">new painting</div>
+  <div class="btn" onclick="saveImage()">save</div>
+</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const SIZE = Math.max(Math.floor(Math.min(window.innerWidth, window.innerHeight) * 0.88), 100);
+canvas.width = SIZE;
+canvas.height = SIZE;
+
+function safeReset() {
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.shadowBlur = 0;
+  ctx.shadowColor = 'rgba(0,0,0,0)';
+  ctx.lineWidth = 1;
+  ctx.setTransform(1,0,0,1,0,0);
+}
+
+const R = {
+  f:    ()      => { const b=new Uint32Array(1); crypto.getRandomValues(b); return b[0]/0xffffffff; },
+  i:    (a,b)   => { const r=new Uint32Array(1); crypto.getRandomValues(r); return a+(r[0]%(b-a)); },
+  from: arr     => arr[R.i(0,arr.length)],
+  bool: (p=0.5) => R.f()<p,
+  range:(a,b)   => a+R.f()*(b-a),
+  pick: (arr,n) => { const s=[...arr],out=[]; for(let i=0;i<n;i++){const j=R.i(i,s.length);[s[i],s[j]]=[s[j],s[i]];out.push(s[i]);} return out; }
+};
+
+const STYLES = ['flow','geo','weave','circles','spiral','splatter','noise'];
+
+const PALETTES = [
+  { name:'void violet',  bg:'#0d0d1a', colors:['#c084fc','#818cf8','#38bdf8','#e879f9','#67e8f9'] },
+  { name:'neon ember',   bg:'#0a0505', colors:['#fb923c','#f472b6','#fbbf24','#f87171','#ff4d4d'] },
+  { name:'acid garden',  bg:'#020a04', colors:['#4ade80','#22d3ee','#a3e635','#34d399','#bef264'] },
+  { name:'golden hour',  bg:'#0f0800', colors:['#fbbf24','#fb923c','#f97316','#fde68a','#ff6b00'] },
+  { name:'ultraviolet',  bg:'#0a0010', colors:['#e879f9','#c084fc','#a78bfa','#f0abfc','#7c3aed'] },
+  { name:'arctic',       bg:'#000a0f', colors:['#22d3ee','#38bdf8','#67e8f9','#7dd3fc','#e0f2fe'] },
+  { name:'monochrome',   bg:'#080808', colors:['#f1f5f9','#cbd5e1','#94a3b8','#475569','#1e293b'] },
+  { name:'toxic',        bg:'#040a00', colors:['#84cc16','#facc15','#4ade80','#a3e635','#fef08a'] },
+  { name:'deep sea',     bg:'#00060f', colors:['#1d4ed8','#2563eb','#7c3aed','#06b6d4','#3b82f6'] },
+  { name:'blood orange', bg:'#0f0300', colors:['#ef4444','#f97316','#fbbf24','#dc2626','#ff8c42'] },
+  { name:'cotton candy', bg:'#0a0010', colors:['#f9a8d4','#fbcfe8','#c4b5fd','#a5b4fc','#fde68a'] },
+  { name:'terminal',     bg:'#000800', colors:['#22c55e','#16a34a','#4ade80','#86efac','#bbf7d0'] },
+  { name:'copper',       bg:'#0a0500', colors:['#d97706','#b45309','#92400e','#fbbf24','#f59e0b'] },
+  { name:'infrared',     bg:'#0f0000', colors:['#ff0000','#ff4d00','#ff9900','#ffcc00','#ff007f'] },
+];
+
+let styleQueue=[], paletteQueue=[];
+function nextStyle()   { if(!styleQueue.length)  styleQueue  = R.pick(STYLES,  STYLES.length);   return styleQueue.pop(); }
+function nextPalette() { if(!paletteQueue.length) paletteQueue= R.pick(PALETTES,PALETTES.length); return paletteQueue.pop(); }
+
+let currentId='';
+
+function generate() {
+  safeReset();
+  const idBytes=new Uint8Array(3); crypto.getRandomValues(idBytes);
+  currentId=Array.from(idBytes).map(b=>b.toString(16).padStart(2,'0')).join('');
+
+  const style   = nextStyle();
+  const palette = nextPalette();
+
+  document.getElementById('seed-display').textContent  = '#'+currentId;
+  document.getElementById('style-label').textContent   = style;
+  document.getElementById('palette-label').textContent = palette.name;
+
+  // Wipe canvas completely
+  safeReset();
+  ctx.clearRect(0,0,SIZE,SIZE);
+  ctx.fillStyle = palette.bg;
+  ctx.fillRect(0,0,SIZE,SIZE);
+
+  try {
+    if      (style==='flow')     drawFlow(palette);
+    else if (style==='geo')      drawGeo(palette);
+    else if (style==='weave')    drawWeave(palette);
+    else if (style==='circles')  drawCircles(palette);
+    else if (style==='spiral')   drawSpiral(palette);
+    else if (style==='splatter') drawSplatter(palette);
+    else if (style==='noise')    drawNoise(palette);
+  } catch(e) {
+    console.warn('draw failed:', e);
+  }
+
+  safeReset();
+  addVignette(palette.bg);
+  safeReset();
+}
+
+// ── FLOW ─────────────────────────────────────────────────────
+function drawFlow(p) {
+  const freq    = R.range(0.001, 0.02);
+  const cols    = R.range(1, 10);
+  const lineLen = R.i(40, 200);
+  const count   = R.i(300, 1200);
+  const speed   = R.range(1.5, 5);
+  const lw      = R.range(0.2, 2.5);
+  const mode    = R.from(['sin+cos','sinmul','atan2','tan']);
+  const glow    = R.bool(0.5);
+
+  for (let i=0; i<count; i++) {
+    let x=R.f()*SIZE, y=R.f()*SIZE;
+    const col=R.from(p.colors);
+    ctx.globalCompositeOperation='source-over';
+    ctx.globalAlpha=R.range(0.15,0.6);
+    ctx.strokeStyle=col;
+    ctx.lineWidth=lw;
+    ctx.shadowBlur = glow ? R.range(3,14) : 0;
+    ctx.shadowColor = col;
+    ctx.beginPath(); ctx.moveTo(x,y);
+    for (let s=0; s<lineLen; s++) {
+      let angle;
+      if      (mode==='sin+cos') angle=(Math.sin(x*freq*cols)+Math.cos(y*freq*cols))*Math.PI*2;
+      else if (mode==='sinmul')  angle=Math.sin(x*freq*cols)*Math.cos(y*freq*cols)*Math.PI*3;
+      else if (mode==='atan2')   angle=Math.atan2(Math.sin(x*freq),Math.cos(y*freq))*cols;
+      else                       angle=Math.tanh(Math.tan(x*freq))*Math.sin(y*freq)*Math.PI;
+      x+=Math.cos(angle)*speed; y+=Math.sin(angle)*speed;
+      if (x<0||x>SIZE||y<0||y>SIZE) break;
+      ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  }
+  ctx.shadowBlur=0; ctx.globalAlpha=1;
+}
+
+// ── GEO ──────────────────────────────────────────────────────
+function drawGeo(p) {
+  const count = R.i(25, 100);
+  for (let i=0; i<count; i++) {
+    const col  = R.from(p.colors);
+    const x    = R.range(-SIZE*0.1, SIZE*1.1);
+    const y    = R.range(-SIZE*0.1, SIZE*1.1);
+    const r    = R.range(SIZE*0.01, SIZE*0.45);
+    const type = R.i(0,5);
+    ctx.globalCompositeOperation='source-over';
+    ctx.globalAlpha = R.range(0.04, 0.28);
+    ctx.shadowBlur  = R.bool(0.3) ? R.range(4,18) : 0;
+    ctx.shadowColor = col;
+    ctx.fillStyle=col; ctx.strokeStyle=col; ctx.lineWidth=R.range(0.5,4);
+    ctx.beginPath();
+    if (type===0) {
+      ctx.arc(x,y,r,0,Math.PI*2);
+    } else if (type===1) {
+      const sides=R.i(3,9), rot=R.f()*Math.PI*2;
+      for(let s=0;s<=sides;s++){const a=(s/sides)*Math.PI*2+rot; s===0?ctx.moveTo(x+Math.cos(a)*r,y+Math.sin(a)*r):ctx.lineTo(x+Math.cos(a)*r,y+Math.sin(a)*r);}
+    } else if (type===2) {
+      ctx.rect(x-r/2,y-r/2,r*R.range(0.3,3),r*R.range(0.3,3));
+    } else if (type===3) {
+      ctx.moveTo(x,y); ctx.lineTo(x+R.range(-SIZE*0.5,SIZE*0.5),y+R.range(-SIZE*0.5,SIZE*0.5));
+      ctx.lineWidth=R.range(1,6);
+    } else {
+      ctx.ellipse(x,y,r,r*R.range(0.2,0.9),R.f()*Math.PI*2,0,Math.PI*2);
+    }
+    R.bool(0.45)&&type!==3 ? ctx.fill() : ctx.stroke();
+  }
+  ctx.shadowBlur=0; ctx.globalAlpha=1;
+}
+
+// ── WEAVE ─────────────────────────────────────────────────────
+function drawWeave(p) {
+  const spacing  = R.range(4,40);
+  const amp      = R.range(5,SIZE*0.35);
+  const freqX    = R.range(0.002,0.05);
+  const freqY    = R.range(0.002,0.05);
+  const phase    = R.range(0,Math.PI*2);
+  const waveType = R.from(['sin','cos','tanh','saw']);
+  const layers   = R.i(1,4);
+  const lw       = R.range(0.3,3);
+
+  function wave(v,freq,ph) {
+    if(waveType==='sin')  return Math.sin(v*freq+ph)*amp;
+    if(waveType==='cos')  return Math.cos(v*freq+ph)*amp;
+    if(waveType==='tanh') return Math.tanh(Math.sin(v*freq+ph)*3)*amp;
+    return ((v*freq+ph)%(Math.PI*2)/Math.PI-1)*amp;
+  }
+
+  for (let layer=0; layer<layers; layer++) {
+    const lphase = phase+layer*(Math.PI*2/layers);
+    ctx.globalCompositeOperation='source-over';
+    ctx.globalAlpha = R.range(0.15,0.5)/Math.max(layers,1);
+    for (let y=-amp; y<SIZE+amp; y+=spacing) {
+      const col=R.from(p.colors);
+      ctx.beginPath(); ctx.strokeStyle=col; ctx.lineWidth=lw;
+      ctx.shadowBlur=R.bool(0.25)?R.range(3,10):0; ctx.shadowColor=col;
+      for (let x=0; x<=SIZE; x+=2) {
+        const wy=wave(x,freqX,lphase)*Math.sin(y*freqY+lphase);
+        x===0?ctx.moveTo(x,y+wy):ctx.lineTo(x,y+wy);
+      }
+      ctx.stroke();
+    }
+    if (R.bool(0.5)) {
+      ctx.globalAlpha=R.range(0.05,0.2)/Math.max(layers,1);
+      for (let x=-amp; x<SIZE+amp; x+=spacing*R.range(0.8,2)) {
+        const col=R.from(p.colors);
+        ctx.beginPath(); ctx.strokeStyle=col; ctx.lineWidth=lw*0.6;
+        for (let y=0; y<=SIZE; y+=2) {
+          const wx=wave(y,freqY,lphase+Math.PI/2)*0.5;
+          y===0?ctx.moveTo(x+wx,y):ctx.lineTo(x+wx,y);
+        }
+        ctx.stroke();
+      }
+    }
+  }
+  ctx.shadowBlur=0; ctx.globalAlpha=1;
+}
+
+// ── CIRCLES ───────────────────────────────────────────────────
+function drawCircles(p) {
+  const count  = R.i(15,80);
+  const style  = R.from(['concentric','random','grid','orbital']);
+  ctx.shadowBlur=0;
+
+  const positions=[];
+  if (style==='grid') {
+    const cols=R.i(3,8);
+    for(let i=0;i<count;i++) positions.push([(i%cols)*(SIZE/cols)+SIZE/cols/2,Math.floor(i/cols)*(SIZE/cols)+SIZE/cols/2]);
+  } else if (style==='orbital') {
+    const cx=SIZE/2,cy=SIZE/2;
+    for(let i=0;i<count;i++){const a=(i/count)*Math.PI*2+R.f()*0.3,rad=R.range(SIZE*0.05,SIZE*0.45);positions.push([cx+Math.cos(a)*rad,cy+Math.sin(a)*rad]);}
+  } else {
+    for(let i=0;i<count;i++) positions.push([R.range(0,SIZE),R.range(0,SIZE)]);
+  }
+
+  for (const [x,y] of positions) {
+    const col=R.from(p.colors);
+    const rings=style==='concentric'?R.i(3,12):1;
+    for (let ring=rings; ring>=1; ring--) {
+      const r=R.range(SIZE*0.02,SIZE*0.25)*(ring/rings);
+      ctx.globalCompositeOperation='source-over';
+      ctx.globalAlpha=R.range(0.05,0.32);
+      ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2);
+      ctx.strokeStyle=col; ctx.fillStyle=col; ctx.lineWidth=R.range(0.5,4);
+      R.bool(0.35)?ctx.fill():ctx.stroke();
+    }
+  }
+  ctx.globalAlpha=1;
+}
+
+// ── SPIRAL ────────────────────────────────────────────────────
+function drawSpiral(p) {
+  const spirals  = R.i(1,6);
+  const turns    = R.range(3,20);
+  const growRate = R.range(0.3,2.5);
+  const lw       = R.range(0.3,3);
+  const jitter   = R.range(0,15);
+
+  for (let s=0; s<spirals; s++) {
+    const cx=R.bool(0.5)?SIZE/2:R.range(SIZE*0.2,SIZE*0.8);
+    const cy=R.bool(0.5)?SIZE/2:R.range(SIZE*0.2,SIZE*0.8);
+    const startAngle=(s/spirals)*Math.PI*2;
+    const col=R.from(p.colors);
+    ctx.globalCompositeOperation='source-over';
+    ctx.globalAlpha=R.range(0.25,0.75);
+    ctx.strokeStyle=col; ctx.lineWidth=lw;
+    ctx.shadowBlur=R.bool(0.5)?R.range(4,14):0; ctx.shadowColor=col;
+    ctx.beginPath();
+    let first=true;
+    for (let a=0; a<turns*Math.PI*2; a+=0.05) {
+      const r=growRate*a;
+      const x=cx+Math.cos(a+startAngle)*r+(jitter?(R.f()-0.5)*jitter:0);
+      const y=cy+Math.sin(a+startAngle)*r+(jitter?(R.f()-0.5)*jitter:0);
+      if(x<-SIZE||x>SIZE*2||y<-SIZE||y>SIZE*2){first=true;continue;}
+      first?ctx.moveTo(x,y):ctx.lineTo(x,y); first=false;
+    }
+    ctx.stroke();
+  }
+  ctx.shadowBlur=0; ctx.globalAlpha=1;
+}
+
+// ── SPLATTER ──────────────────────────────────────────────────
+function drawSplatter(p) {
+  const blobs   = R.i(200,1200);
+  const mode    = R.from(['explode','gravity','drift','constellation']);
+  const origins = Array.from({length:R.i(1,5)},()=>[R.range(0,SIZE),R.range(0,SIZE)]);
+
+  for (let i=0; i<blobs; i++) {
+    const [ox,oy]=R.from(origins);
+    let x,y;
+    if      (mode==='explode')       { const a=R.f()*Math.PI*2,d=Math.pow(R.f(),0.5)*SIZE*0.6; x=ox+Math.cos(a)*d; y=oy+Math.sin(a)*d; }
+    else if (mode==='gravity')       { x=ox+R.range(-SIZE*0.4,SIZE*0.4); y=oy+Math.pow(R.f(),2)*SIZE*0.8; }
+    else if (mode==='drift')         { x=R.f()*SIZE; y=R.f()*SIZE; }
+    else                             { x=R.bool(0.1)?R.f()*SIZE:ox+R.range(-80,80); y=R.bool(0.1)?R.f()*SIZE:oy+R.range(-80,80); }
+    const col=R.from(p.colors);
+    const r=R.range(1,SIZE*0.04);
+    ctx.globalCompositeOperation='source-over';
+    ctx.globalAlpha=R.range(0.05,0.55);
+    ctx.shadowBlur=0;
+    ctx.fillStyle=col;
+    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+    if (mode==='constellation'&&R.bool(0.05)) {
+      const [ox2,oy2]=R.from(origins);
+      ctx.globalAlpha=R.range(0.05,0.2);
+      ctx.beginPath(); ctx.moveTo(x,y);
+      ctx.lineTo(ox2+R.range(-80,80),oy2+R.range(-80,80));
+      ctx.strokeStyle=col; ctx.lineWidth=R.range(0.2,1); ctx.stroke();
+    }
+  }
+  ctx.globalAlpha=1;
+}
+
+// ── NOISE ─────────────────────────────────────────────────────
+function drawNoise(p) {
+  const w=SIZE,h=SIZE;
+  const imgData=ctx.createImageData(w,h);
+  const data=imgData.data;
+  const scaleX=R.range(0.001,0.018);
+  const scaleY=R.range(0.001,0.018);
+  const octaves=R.i(1,6);
+  const warp=R.range(0,2.5);
+  const colorMode=R.from(['gradient','bands','posterize']);
+  const bands=R.i(3,12);
+  const levels=R.i(2,6);
+  const perm=R.pick(Array.from({length:256},(_,i)=>i),256);
+  const pp=[...perm,...perm];
+
+  function fade(t){return t*t*t*(t*(t*6-15)+10);}
+  function lerp(a,b,t){return a+t*(b-a);}
+  function grad(h,x,y){const hh=h&3,u=hh<2?x:y,v=hh<2?y:x;return((hh&1)?-u:u)+((hh&2)?-v:v);}
+  function noise(x,y){
+    const xi=Math.floor(x)&255,yi=Math.floor(y)&255;
+    const xf=x-Math.floor(x),yf=y-Math.floor(y);
+    return lerp(lerp(grad(pp[pp[xi]+yi],xf,yf),grad(pp[pp[xi+1]+yi],xf-1,yf),fade(xf)),
+                lerp(grad(pp[pp[xi]+yi+1],xf,yf-1),grad(pp[pp[xi+1]+yi+1],xf-1,yf-1),fade(xf)),fade(yf));
+  }
+  function fbm(x,y){
+    let v=0,a=0.5,f=1,m=0;
+    for(let o=0;o<octaves;o++){v+=noise(x*f,y*f)*a;m+=a;a*=0.5;f*=2;}
+    return v/m;
+  }
+
+  const hexToRgb=h=>[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];
+  const rgbC=p.colors.map(hexToRgb);
+
+  for(let y=0;y<h;y++){
+    for(let x=0;x<w;x++){
+      let nx=x*scaleX,ny=y*scaleY;
+      if(warp>0){nx+=warp*fbm(nx+1.7,ny+9.2);ny+=warp*fbm(nx+8.3,ny+2.8);}
+      const n=Math.max(0,Math.min(1,(fbm(nx,ny)+1)/2));
+      let r,g,b;
+      if(colorMode==='gradient'){
+        const idx=n*(rgbC.length-1),i0=Math.floor(idx),i1=Math.min(i0+1,rgbC.length-1),t=idx-i0;
+        r=Math.round(rgbC[i0][0]+(rgbC[i1][0]-rgbC[i0][0])*t);
+        g=Math.round(rgbC[i0][1]+(rgbC[i1][1]-rgbC[i0][1])*t);
+        b=Math.round(rgbC[i0][2]+(rgbC[i1][2]-rgbC[i0][2])*t);
+      } else if(colorMode==='bands'){
+        [r,g,b]=rgbC[Math.floor(n*bands)%rgbC.length];
+      } else {
+        [r,g,b]=rgbC[Math.min(Math.floor(Math.floor(n*levels)/levels*(rgbC.length-1)),rgbC.length-1)];
+      }
+      const i=(y*w+x)*4; data[i]=r;data[i+1]=g;data[i+2]=b;data[i+3]=255;
+    }
+  }
+  ctx.putImageData(imgData,0,0);
+}
+
+function addVignette(bg) {
+  const grad=ctx.createRadialGradient(SIZE/2,SIZE/2,SIZE*0.15,SIZE/2,SIZE/2,SIZE*0.85);
+  grad.addColorStop(0,'rgba(0,0,0,0)');
+  grad.addColorStop(1,bg+'bb');
+  ctx.fillStyle=grad; ctx.fillRect(0,0,SIZE,SIZE);
+}
+
+function saveImage(){
+  const a=document.createElement('a');
+  a.download='gen-art-'+currentId+'.png';
+  a.href=canvas.toDataURL('image/png');
+  a.click();
+}
+
+window.addEventListener('load', ()=>generate());
+</script>
+</body>
+</html>
